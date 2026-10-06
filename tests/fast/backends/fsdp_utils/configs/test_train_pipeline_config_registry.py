@@ -22,7 +22,7 @@ register_cpu_ci(est_time=30, suite="stage-a-cpu", labels=[])
 import pytest
 import torch
 
-from miles.backends.fsdp_utils.configs.h3 import H3TrainPipelineConfig
+from miles.backends.fsdp_utils.configs.h3 import H3Ref2VATrainPipelineConfig, H3TrainPipelineConfig
 from miles.backends.fsdp_utils.configs.krea2 import Krea2TrainPipelineConfig
 from miles.backends.fsdp_utils.configs.qwen_image import QwenImageTrainPipelineConfig
 from miles.backends.fsdp_utils.configs.sd3 import SD3TrainPipelineConfig
@@ -64,6 +64,7 @@ class TestTaskDispatch:
         [
             ("sd3", None, SD3TrainPipelineConfig),
             ("h3", "t2va", H3TrainPipelineConfig),
+            ("h3", "ref2va", H3Ref2VATrainPipelineConfig),
         ],
     )
     def test_task_selects_config(self, family, task, config):

@@ -246,7 +246,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default=None,
                 help=(
                     "Generation task as SGLang names it, one the family's TrainPipelineConfig is registered for "
-                    "(H3: t2va). Required by families registered per task; others take none."
+                    "(H3: t2va, ref2va). Required by families registered per task; others take none."
                 ),
             )
             parser.add_argument(
