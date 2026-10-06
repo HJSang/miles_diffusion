@@ -94,6 +94,8 @@ class MediaInfo:
     height: int | None = None
     # Unknown counts as square.
     sample_aspect_ratio: Fraction = Fraction(1)
+    audio_sample_rate: int | None = None
+    audio_num_channels: int | None = None
 
 
 class MediaSource(ABC):
@@ -112,7 +114,8 @@ class MediaSource(ABC):
 
     @abstractmethod
     def decode(self, start: int, length: int) -> torch.Tensor:
-        """The window ``[start, start + length)`` in the media's own unit: frames for images and video."""
+        """The window ``[start, start + length)`` in the media's own unit: frames for images and video, samples
+        for audio."""
 
     def _ffprobe(self, *arguments: str) -> dict:
         probe = subprocess.run(
@@ -247,6 +250,35 @@ class VideoSource(MediaSource):
         if numerator.isdigit() and denominator.isdigit() and int(numerator) > 0:
             return Fraction(int(numerator), int(denominator))
         return Fraction(1)
+
+
+class AudioSource(MediaSource):
+    """The first audio stream of a file, a video's soundtrack included."""
+
+    @cached_property
+    def info(self) -> MediaInfo:
+        probed = self._ffprobe("-show_entries", "stream=codec_type,sample_rate,channels")
+        audio = next((stream for stream in probed["streams"] if stream["codec_type"] == "audio"), None)
+        if audio is None:
+            raise ValueError(f"{self.path} has no audio stream")
+        return MediaInfo(audio_sample_rate=int(audio["sample_rate"]), audio_num_channels=int(audio["channels"]))
+
+    def decode(self, start: int, length: int) -> torch.Tensor:
+        """Samples ``[start, start + length)`` at the native rate and channel count as float32 ``[C, N]``.
+
+        ``atrim`` counts decoded samples, so the window is sample-exact.
+        """
+        import numpy as np
+
+        num_channels = self.info.audio_num_channels
+        window = f"atrim=start_sample={start}:end_sample={start + length},asetpts=PTS-STARTPTS"
+        raw = self._ffmpeg("-map", "0:a:0", "-vn", "-af", window, "-f", "f32le")
+        if len(raw) != length * num_channels * 4:
+            raise ValueError(
+                f"{self.path}: ffmpeg returned {len(raw)} bytes, not {length} samples of {num_channels} float32 channels"
+            )
+        samples = np.frombuffer(raw, dtype=np.float32).reshape(length, num_channels)
+        return torch.from_numpy(samples.T.copy())
 
 
 def visual_source(path: str) -> ImageSource | VideoSource:

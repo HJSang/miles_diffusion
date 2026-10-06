@@ -3,6 +3,8 @@
     visual_source(path) -> ImageSource | VideoSource      load (miles.utils.media), chosen by extension
       .info         ffprobe frame list     num_frames/fps/frame times, upright size, sample aspect ratio
       .decode       ffmpeg trim            frames [start, start + length) only, upright stored pixels
+    AudioSource(path).info                 sample rate and channels of the first audio stream (a soundtrack counts)
+      .decode       ffmpeg atrim           samples [start, start + length) at the native rate, float32 [C, N]
            |
     process: exact frame count, canvas size and square pixels, else an error; every frame_stride-th frame
            |
@@ -30,10 +32,14 @@ What each test pins:
 Real media (public Hugging Face fixtures at pinned revisions, and ffmpeg FATE samples pinned by sha256):
   cat-rotated.jpg    EXIF orientation 8 photo   stored 500x333 --rotate 90 CCW--> upright 333x500 frame
   sample_demo_1.mp4  H.264 + AAC, 640x360       243 frames at 25 fps; a mid-clip window equals an independent
-                                                ffmpeg select-filter decode of the same frames
+                                                ffmpeg select-filter decode of the same frames;
+                                                its AAC soundtrack is 44.1 kHz stereo
   displaymatrix.mov  H.264, -90 degree rotation stored 160x240 of 1:2 pixels --turn clockwise--> upright 240x160
                      (FATE, cut to 33 frames)   of 2:1 pixels; a window equals the stored frames read with
                                                 -noautorotate and turned by hand
+  1.flac             FLAC speech                16 kHz mono
+  both audio files: a mid-file sample window equals the same samples cut from a whole-file decode,
+  and the photo, which has no audio stream, is rejected by AudioSource
 """
 
 from tests.ci.ci_register import register_cpu_ci
@@ -419,6 +425,10 @@ def _real_rotated_video(tmp_path) -> str:
     return str(path)
 
 
+def _real_speech() -> str:
+    return _hub_media("Narsil/asr_dummy", "8d141c84e3f84c54cd7bbaa851d24edd0f559734", "1.flac")
+
+
 def test_image_source_turns_a_real_exif_rotated_photo_upright():
     from miles.utils.media import ImageSource
 
@@ -474,3 +484,30 @@ def test_video_source_turns_a_real_rotated_clip_upright(tmp_path):
     stored = np.frombuffer(selected, dtype=np.uint8).reshape(3, 240, 160, 3)
     upright = torch.from_numpy(np.rot90(stored, k=-1, axes=(1, 2)).copy()).permute(0, 3, 1, 2)
     assert torch.equal(source.decode(10, 3), upright)
+
+
+@pytest.mark.parametrize(
+    "media, sample_rate, num_channels", [(_real_speech, 16000, 1), (_real_video, 44100, 2)], ids=["flac", "aac"]
+)
+def test_audio_source_windows_real_audio_sample_exactly(media, sample_rate, num_channels):
+    _require_ffmpeg("ffmpeg", "ffprobe")
+    from miles.utils.media import AudioSource
+
+    path = media()
+    source = AudioSource(path)
+    assert (source.info.audio_sample_rate, source.info.audio_num_channels) == (sample_rate, num_channels)
+    # samples 12345..16344, cut by atrim instead of from the whole decode:
+    #   decode(12345, 4000)  ==  whole_file[:, 12345:16345]
+    whole = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path, "-map", "0:a:0", "-f", "f32le", "-"], capture_output=True, check=True
+    ).stdout
+    whole_file = torch.from_numpy(np.frombuffer(whole, dtype=np.float32).reshape(-1, num_channels).T.copy())
+    assert torch.equal(source.decode(12345, 4000), whole_file[:, 12345:16345])
+
+
+def test_audio_source_rejects_a_file_without_audio():
+    _require_ffmpeg("ffprobe")
+    from miles.utils.media import AudioSource
+
+    with pytest.raises(ValueError, match="has no audio stream"):
+        assert AudioSource(_real_photo()).info
