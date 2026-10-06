@@ -1,4 +1,4 @@
-"""Frozen-encoder logic per model family, decoupled from the training-side TrainPipelineConfig.
+"""Frozen-encoder logic per model family and --diffusion-task, decoupled from the training-side TrainPipelineConfig.
 
 Each family module provides:
 - ``load_encoder(args, device)``: load the frozen encode components (tokenizer/text
@@ -12,11 +12,15 @@ Each family module provides:
 """
 
 
-def get_encoder(family: str | None):
+def get_encoder(family: str | None, task: str | None):
     if family == "wan2_2":
         from miles.rollout.encoder_hub import wan2_2
 
         return wan2_2
+    if family == "h3" and task == "ref2va":
+        from miles.rollout.encoder_hub import h3_ref2va
+
+        return h3_ref2va
     if family == "h3":
         from miles.rollout.encoder_hub import h3
 

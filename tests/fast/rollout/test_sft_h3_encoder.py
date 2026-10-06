@@ -1,8 +1,9 @@
 """H3 encode contract: what validate_args rejects, what the engine geometry yields.
 
-    frames 17n+5 --.                        .-- latent_t = (f-1)/16*4+... = 32 @107f
-    canvas %32 ----+-- validate_args        +-- video rows = t*(H/32)*(W/32) = 32256
-    stride == 1 --'                         '-- packed seq: [text|video|pad] aligned 64
+    frames 17n+5 ----.                        .-- latent_t = (f-1)/16*4+... = 32 @107f
+    ref2va 4-15 s ---+                        |
+    canvas %32 ------+-- validate_args        +-- video rows = t*(H/32)*(W/32) = 32256
+    stride == 1 ----'                         '-- packed seq: [text|video|pad] aligned 64
 
 Each test pins one side: rejection of off-grid inputs, or an engine-derived
 geometry invariant the cached latents depend on.
@@ -18,7 +19,7 @@ import pytest
 
 pytest.importorskip("sglang.multimodal_gen")
 
-from miles.rollout.encoder_hub import h3
+from miles.rollout.encoder_hub import h3, h3_ref2va
 
 
 def _args(**overrides):
@@ -44,6 +45,12 @@ class TestValidateArgs:
     def test_rejects_wrong_short_edge(self):
         with pytest.raises(ValueError, match="short_edge"):
             h3.validate_args(_args(diffusion_height=480, diffusion_width=832))
+
+    @pytest.mark.parametrize("num_frames", [90, 379])
+    def test_ref2va_rejects_targets_outside_4_to_15_seconds(self, num_frames):
+        # Both sit on the 17n+5 grid: 90 frames = 3.75 s, 379 frames = 15.8 s at 24 fps.
+        with pytest.raises(ValueError, match="must last 4-15 s"):
+            h3_ref2va.validate_args(_args(diffusion_output_num_frames=num_frames))
 
 
 class TestGeometry:

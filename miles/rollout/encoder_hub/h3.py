@@ -24,7 +24,8 @@ H3_SHORT_EDGE = 768
 H3_TEXT_HIDDEN_DIM = 5120
 
 
-def validate_args(args: Namespace) -> None:
+def validate_frame_grid_and_stride(args: Namespace) -> None:
+    """The temporal constraints every H3 encode shares."""
     from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.time_request import (
         minimax_h3_align_frame_count,
     )
@@ -32,15 +33,19 @@ def validate_args(args: Namespace) -> None:
     num_frames = int(args.diffusion_output_num_frames)
     if minimax_h3_align_frame_count(num_frames) != num_frames:
         raise ValueError(f"--diffusion-output-num-frames must sit on H3's 17n+5 grid, got {num_frames}")
+    if int(args.sft_frame_stride) != 1:
+        # A stride would make audio_t (frame_count / 24) describe unkept pixels.
+        raise ValueError(f"H3 encode requires --sft-frame-stride 1, got {args.sft_frame_stride}")
+
+
+def validate_args(args: Namespace) -> None:
+    validate_frame_grid_and_stride(args)
     height, width = int(args.diffusion_height), int(args.diffusion_width)
     if min(height, width) != H3_SHORT_EDGE:
         raise ValueError(f"H3 pins short_edge={H3_SHORT_EDGE}, got {height}x{width}")
     if height % 32 or width % 32:
         # /16 VAE latent grid then /2 patchify: both spatial dims must survive.
         raise ValueError(f"H3 canvas dims must be multiples of 32, got {height}x{width}")
-    if int(args.sft_frame_stride) != 1:
-        # A stride would make audio_t (frame_count / 24) describe unkept pixels.
-        raise ValueError(f"H3 encode requires --sft-frame-stride 1, got {args.sft_frame_stride}")
 
 
 def _load_video_vae(ckpt_dir: str, device: torch.device):
@@ -73,7 +78,9 @@ def _load_video_vae(ckpt_dir: str, device: torch.device):
     except ValueError:
         set_global_server_args(ServerArgs(model_path="MiniMaxAI/MiniMax-H3"))
 
-    config = MiniMaxH3VideoVAEConfig(arch_config=arch)
+    # Encode actors are independent single-device workers; no SGLang replica
+    # process group exists for the VAE or shared reference-frame collectives.
+    config = MiniMaxH3VideoVAEConfig(arch_config=arch, use_parallel_decode=False, use_parallel_tiling=False)
     config.post_init()
     vae = MiniMaxH3VideoVAE(config)
 
@@ -103,20 +110,19 @@ def _load_text_encoder(ckpt_dir: str, device: torch.device):
     return encoder.to(device).eval()
 
 
-def load_encoder(args: Namespace, device: torch.device) -> dict:
+def checkpoint_dir(checkpoint: str, allow_patterns: list[str]) -> str:
+    """A local checkpoint as is; an HF name downloads only the files matching allow_patterns."""
     import os
 
     from huggingface_hub import snapshot_download
+
+    return checkpoint if os.path.isdir(checkpoint) else snapshot_download(checkpoint, allow_patterns=allow_patterns)
+
+
+def load_encoder(args: Namespace, device: torch.device) -> dict:
     from transformers import AutoTokenizer
 
-    ckpt = args.sft_encoder_checkpoint
-    if os.path.isdir(ckpt):
-        ckpt_dir = ckpt
-    else:
-        ckpt_dir = snapshot_download(
-            ckpt,
-            allow_patterns=["FL2VA/video_vae/*", "text_encoder/*", "tokenizer/*"],
-        )
+    ckpt_dir = checkpoint_dir(args.sft_encoder_checkpoint, ["FL2VA/video_vae/*", "text_encoder/*", "tokenizer/*"])
     tokenizer = AutoTokenizer.from_pretrained(f"{ckpt_dir}/tokenizer")
     vae, vae_arch = _load_video_vae(ckpt_dir, device)
     text_encoder = _load_text_encoder(ckpt_dir, device)
