@@ -241,6 +241,15 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
+                "--diffusion-task",
+                type=str,
+                default=None,
+                help=(
+                    "Generation task as SGLang names it, one the family's TrainPipelineConfig is registered for "
+                    "(H3: t2va). Required by families registered per task; others take none."
+                ),
+            )
+            parser.add_argument(
                 "--train-pipeline-config-path",
                 type=str,
                 default=None,
@@ -1762,7 +1771,7 @@ def miles_validate_args(args):
             # Downstream lookups compare this exactly (encoder_hub.get_encoder), so normalize
             # here rather than at every reader.
             args.diffusion_model_family = args.diffusion_model_family.strip().lower()
-        cfg_cls = get_train_pipeline_config_cls(args.diffusion_model_family)
+        cfg_cls = get_train_pipeline_config_cls(args.diffusion_model_family, args.diffusion_task)
         args.train_pipeline_config_path = f"{cfg_cls.__module__}.{cfg_cls.__qualname__}"
     if args.model_backend_path is None:
         args.model_backend_path = cfg_cls.model_backend_path

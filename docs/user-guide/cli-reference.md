@@ -169,6 +169,7 @@ See [Dtype Control](../advanced/dtype-control.md).
 |---|---|---|---|
 | `--hf-checkpoint` | str | – | **Required.** Pipeline to train and to serve; also the family source. |
 | `--diffusion-model-family` | str | – | Registered family key: `sd3`, `wan2_2`, `ltx`, `qwen_image`, `cosmos3`. Overrides name matching. |
+| `--diffusion-task` | str | – | SGLang task name the family's config is registered for; required by families registered per task, unset for the rest. H3: `t2va`. |
 | `--rollout-function-path` | str | `miles.rollout.sglang_rollout.generate_rollout` | Generic Miles default. Diffusion recipes explicitly set `miles.rollout.sglang_diffusion_rollout.generate_rollout`. |
 | `--train-pipeline-config-path` | str | – | Your own `TrainPipelineConfig` for an unregistered family. Mutually exclusive with `--diffusion-model-family`. |
 | `--model-backend-path` | str | – | Override the family's model loader. |
